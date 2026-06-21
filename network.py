@@ -1,12 +1,11 @@
 import json
+import asyncio
 from typing import Callable, Awaitable, Optional, Dict, Any, List
 
 class StateMachine:
     def __init__(self):
-        # The distributed log and current commit tracker
         self.log = []
         self.commit_index = 0
-        # The actual database state
         self.kv_store = {}
 
     def append_entry(self, term: int, command: str, key: str, value: str):
@@ -29,7 +28,6 @@ class RaftRPC:
 
     @staticmethod
     def request_vote(term: int, candidate_id: int, last_log_index: int, last_log_term: int) -> str:
-        """Invoked by candidates to gather votes during an election."""
         payload = {
             "rpc_type": "RequestVote",
             "term": term,
@@ -42,7 +40,6 @@ class RaftRPC:
     @staticmethod
     def append_entries(term: int, leader_id: int, prev_log_index: int, 
                        prev_log_term: int, entries: List[Dict], leader_commit: int) -> str:
-        """Invoked by leader to replicate log entries and provide heartbeats."""
         payload = {
             "rpc_type": "AppendEntries",
             "term": term,
