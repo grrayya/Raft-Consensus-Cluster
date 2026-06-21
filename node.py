@@ -27,6 +27,7 @@ class RaftNode:
         """Boots the TCP server and starts the background Raft daemon."""
         await self.transport.start_listening(self.handle_incoming_rpc)
         await self.listen_for_heartbeats()
+        
 async def handle_incoming_rpc(self, request: dict) -> dict:
         """Processes incoming network requests from other nodes."""
         rpc_type = request.get("rpc_type")
@@ -53,3 +54,19 @@ async def handle_incoming_rpc(self, request: dict) -> dict:
             return {"success": True, "term": self.current_term}
             
         return {"error": "Unknown RPC"}
+    
+async def listen_for_heartbeats(self):
+        """Background daemon that monitors leader health and triggers elections."""
+        while True:
+            await asyncio.sleep(0.1)
+            
+            # If we are the leader, our job is to send heartbeats, not listen for them
+            if self.state == "leader":
+                await self.broadcast_heartbeats()
+                continue
+
+            # Check if our randomized countdown timer has expired
+            elapsed = time.time() - self.last_heartbeat
+            if elapsed > self.election_timeout:
+                print(f"[Node {self.node_id}] Leader timeout. Initiating election.")
+                await self.start_election()
