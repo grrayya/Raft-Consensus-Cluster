@@ -70,3 +70,59 @@ async def listen_for_heartbeats(self):
             if elapsed > self.election_timeout:
                 print(f"[Node {self.node_id}] Leader timeout. Initiating election.")
                 await self.start_election()
+
+async def start_election(self):
+        """Transitions to candidate, increments term, and requests votes over TCP."""
+        self.state = "candidate"
+        self.current_term += 1
+        self.voted_for = self.node_id  # Vote for ourselves
+        votes_received = 1
+        self.last_heartbeat = time.time()
+
+        print(f"[Node {self.node_id}] Term {self.current_term}: Requesting votes...")
+        
+        # 1. Fire concurrent network requests to all peers
+        tasks = []
+        for peer_id in self.peers:
+            target_port = 5000 + peer_id
+            payload = RaftRPC.request_vote(self.current_term, self.node_id, len(self.state_machine.log), 0)
+            tasks.append(self.transport.send_rpc('127.0.0.1', target_port, payload))
+            
+        # 2. Wait for all peers to reply (or timeout)
+        results = await asyncio.gather(*tasks)
+        
+        # 3. Tally the incoming votes
+        for res in results:
+            if res and res.get("vote_granted"):
+                votes_received += 1
+
+        # 4. Check if we achieved a majority consensus
+        majority = (len(self.peers) + 1) // 2 + 1
+        if votes_received >= majority:
+            print(f"[Node {self.node_id}] Achieved consensus ({votes_received} votes)! Becoming leader.")
+            self.state = "leader"
+            await self.broadcast_heartbeats()
+
+async def broadcast_heartbeats(self):
+        """Sends AppendEntries RPCs to all peers to maintain leadership authority."""
+        print(f"[Node {self.node_id}] Broadcasting authority pulses...")
+        self.last_heartbeat = time.time()
+        
+        # Fire heartbeat RPCs to every other node in the cluster
+        tasks = []
+        for peer_id in self.peers:
+            target_port = 5000 + peer_id
+            
+            # Sending an empty 'entries' list acts as a pure heartbeat
+            payload = RaftRPC.append_entries(
+                term=self.current_term, 
+                leader_id=self.node_id, 
+                prev_log_index=len(self.state_machine.log), 
+                prev_log_term=0, 
+                entries=[], 
+                leader_commit=self.state_machine.commit_index
+            )
+            tasks.append(self.transport.send_rpc('127.0.0.1', target_port, payload))
+            
+        # Send them all concurrently
+        await asyncio.gather(*tasks)
